@@ -1,0 +1,139 @@
+#include "Arduino.h"
+#include "ESP8266WiFi.h"
+#include "ESP8266WebServer.h"
+
+// Définition des entrées/sorties
+#define PIN_LED_ROUGE 5
+#define PIN_LED_VERTE 4
+#define PIN_PIR 14  // Exemple de broche pour le capteur PIR (GPIO14 sur la plupart des ESP8266)
+
+// Page html
+const char index_html[] PROGMEM = R"=====(
+<!doctype html>
+<html lang="fr">
+    <head>
+        <meta charset="utf-8">
+        <title>Capteur PIR</title>
+        <meta http-equiv="refresh" content="1">
+    </head>
+    <body>
+        <h1>État du capteur PIR</h1>
+        <h2 id="etatPIR">%ETAT%</h2>
+
+        <script>
+            function miseAJour() {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if (this.readyState == 4 && this.status == 200) {
+                        document.getElementById("etatPIR").innerHTML = "État du capteur PIR : " + (this.responseText === "1" ? "Mouvement détecté" : "Aucun mouvement détecté");
+                    }
+                };
+                xhttp.open("GET", "/getPIRState", true);
+                xhttp.send();
+            }
+
+            setInterval(miseAJour, 1000);
+        </script>
+    </body>
+</html>
+)=====";
+
+// Informations de connexion : cachées dans fichier InfoConnexion.h
+// Vous pouvez décommenter ici ou créer comme moi un fichier InfoConnexion.h
+const char *SSID = "Redmi Note 11";
+const char *PASSWORD = "esther2001";
+
+// Gestion des événements du WiFi
+// Lorsque la connexion vient d'aboutir
+void onConnected(const WiFiEventStationModeConnected &event);
+// Lorsque l'adresse IP est attribuée
+void onGotIP(const WiFiEventStationModeGotIP &event);
+
+// Objet WebServer
+ESP8266WebServer serverWeb(80);
+
+// État du capteur PIR
+bool motionDetected = false;
+
+void handleRoot()
+{
+    Serial.println("Requête HTTP reçue du client pour la page d'accueil !");
+    
+    String motionStatus = (motionDetected ? "Mouvement détecté" : "Aucun mouvement détecté");
+    Serial.println("État du capteur PIR : " + motionStatus);
+    
+    String temp(reinterpret_cast<const __FlashStringHelper *>(index_html));
+    temp.replace("%ETAT%", motionStatus);
+    serverWeb.send(200, "text/html", temp);
+}
+
+void getPIRState()
+{
+    Serial.println("Requête HTTP reçue du client pour l'état du capteur PIR !");
+    
+    String pirState = (motionDetected ? "1" : "0");
+    Serial.println("État du capteur PIR : " + pirState);
+    
+    serverWeb.send(200, "text/plain", pirState);
+}
+
+
+void setup()
+{
+    // Mise en place d'une liaison série
+    Serial.begin(9600L);
+    delay(100);
+
+    // Configuration des entrées/sorties
+    pinMode(PIN_LED_ROUGE, OUTPUT);
+    pinMode(PIN_LED_VERTE, OUTPUT);
+    pinMode(PIN_PIR, INPUT);
+
+    // Mode de connexion
+    WiFi.mode(WIFI_STA);
+
+    // Démarrage de la connexion
+    WiFi.begin(SSID, PASSWORD);
+
+    static WiFiEventHandler onConnectedHandler = WiFi.onStationModeConnected(onConnected);
+    static WiFiEventHandler onGotIPHandler = WiFi.onStationModeGotIP(onGotIP);
+
+    // Mise en place du serveur WebServer
+    serverWeb.on("/", HTTP_GET, handleRoot);
+    serverWeb.on("/getPIRState", HTTP_GET, getPIRState);
+    serverWeb.begin();
+}
+
+void loop()
+{
+    // Si l'objet est connecté au réseau, on effectue les tâches qui doivent l'être dans ce cas
+    if (WiFi.isConnected())
+    {
+        digitalWrite(PIN_LED_ROUGE, HIGH);
+
+        // Lire l'état du capteur PIR
+        motionDetected = digitalRead(PIN_PIR) == HIGH;
+
+        // Gérer les requêtes du serveur Web
+        serverWeb.handleClient();
+    }
+    else
+    {
+        digitalWrite(PIN_LED_ROUGE, LOW);
+    }
+}
+
+void onConnected(const WiFiEventStationModeConnected &event)
+{
+    Serial.println("WiFi connecté");
+    Serial.println("Adresse IP : " + WiFi.localIP().toString());
+}
+
+void onGotIP(const WiFiEventStationModeGotIP &event)
+{
+    Serial.println("Adresse IP : " + WiFi.localIP().toString());
+    Serial.println("Passerelle IP : " + WiFi.gatewayIP().toString());
+    Serial.println("DNS IP : " + WiFi.dnsIP().toString());
+    Serial.print("Puissance de réception : ");
+    Serial.println(WiFi.RSSI());
+}
